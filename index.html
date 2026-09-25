@@ -119,6 +119,15 @@ input[type=number]::-webkit-outer-spin-button,input[type=number]::-webkit-inner-
 .users-tbl .dt{font-variant-numeric:tabular-nums; color:var(--muted); font-size:11.5px; white-space:nowrap}
 .users-tbl .idx{color:var(--faint); font-size:11px; font-variant-numeric:tabular-nums}
 .emptyrow{padding:22px 14px; text-align:center; color:var(--faint); font-size:12.5px}
+.modal{position:fixed; inset:0; z-index:80; background:rgba(18,32,42,.55); display:grid; place-items:center; padding:14px}
+.modal .box{
+  width:min(1000px,100%); height:min(93vh,100%); background:var(--surface);
+  border-radius:12px; overflow:hidden; display:flex; flex-direction:column;
+  box-shadow:0 24px 60px -20px rgba(18,32,42,.55);
+}
+.modal .mh{display:flex; gap:8px; align-items:center; padding:10px 14px; border-bottom:1px solid var(--line); background:var(--surface-2)}
+.modal .mh b{font-size:13px}
+.modal iframe{flex:1 1 auto; width:100%; border:0; background:#DCD8CF}
 .kpis{display:grid; gap:9px; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); padding:12px 14px}
 .kpi{background:var(--surface-2); border:1px solid var(--line); border-radius:var(--r); padding:10px 12px}
 .kpi .k{font-size:10.5px; color:var(--muted); font-weight:600}
@@ -539,6 +548,7 @@ function refreshAll(){
       if(isFinite(m)) STATS.sum += m;
       var meta = (v.state && v.state.meta) || {};
       REPORTS.push({
+        id: v.id,
         no: v.form_no || meta.formNo || "",
         name: v.name || "",
         by: v.by_name || meta.appraiser || "",
@@ -599,7 +609,7 @@ function renderReports(){
   }
 
   var rows = ['<tr><th>#</th><th>رقم التقييم</th><th>اسم التقييم</th><th>الموقع</th>' +
-              '<th>الصك</th><th>المقيّم</th><th>القيمة السوقية</th><th>تاريخ التقييم</th></tr>'];
+              '<th>الصك</th><th>المقيّم</th><th>القيمة السوقية</th><th>تاريخ التقييم</th><th>التقرير</th></tr>'];
   list.forEach(function(r, i){
     rows.push('<tr>' +
       '<td class="idx">' + (i + 1) + '</td>' +
@@ -610,10 +620,65 @@ function renderReports(){
       '<td>' + esc(r.by || "—") + '</td>' +
       '<td class="money">' + n0(r.value) + '</td>' +
       '<td class="dt">' + esc(r.date || "—") + '</td>' +
+      '<td><div class="acts">' +
+        '<button class="btn ghost tiny" data-prev="' + esc(r.id) + '">معاينة</button>' +
+        '<button class="btn ghost tiny" data-exp="' + esc(r.id) + '">تصدير</button>' +
+      '</div></td>' +
     '</tr>');
   });
   tbl.innerHTML = rows.join("");
+
+  Array.prototype.slice.call(tbl.querySelectorAll("[data-prev]")).forEach(function(b){
+    b.addEventListener("click", function(){ openPreview(b.getAttribute("data-prev")); });
+  });
+  Array.prototype.slice.call(tbl.querySelectorAll("[data-exp]")).forEach(function(b){
+    b.addEventListener("click", function(){
+      window.open(APP_URL + "index.html?report=" + encodeURIComponent(b.getAttribute("data-exp")) + "&print=1", "_blank", "noopener");
+    });
+  });
 }
+
+var APP_URL = "https://etaqyeem.github.io/";
+function closePreview(){
+  var m = document.getElementById("repModal");
+  if(m) m.remove();
+}
+function openPreview(id){
+  closePreview();
+  var r = REPORTS.filter(function(x){ return x.id === id; })[0] || {};
+  var wrap = document.createElement("div");
+  wrap.className = "modal";
+  wrap.id = "repModal";
+  wrap.innerHTML =
+    '<div class="box">' +
+      '<div class="mh">' +
+        '<b>' + esc(r.name || "تقرير") + '</b>' +
+        '<span class="hint">' + esc(r.no || "") + '</span>' +
+        '<button class="btn tiny" type="button" id="mPrint">طباعة / حفظ PDF</button>' +
+        '<button class="btn tiny" type="button" id="mTab">فتح في تبويب</button>' +
+        '<button class="btn ghost tiny" type="button" id="mClose">إغلاق</button>' +
+      '</div>' +
+      '<iframe id="mFrame" src="' + APP_URL + 'index.html?report=' + encodeURIComponent(id) + '"></iframe>' +
+    '</div>';
+  document.body.appendChild(wrap);
+  document.getElementById("mClose").addEventListener("click", closePreview);
+  document.getElementById("mTab").addEventListener("click", function(){
+    window.open(APP_URL + "index.html?report=" + encodeURIComponent(id), "_blank", "noopener");
+  });
+  document.getElementById("mPrint").addEventListener("click", function(){
+    var f = document.getElementById("mFrame");
+    try{ f.contentWindow.focus(); f.contentWindow.print(); }
+    catch(e){ window.open(APP_URL + "index.html?report=" + encodeURIComponent(id) + "&print=1", "_blank", "noopener"); }
+  });
+  wrap.addEventListener("click", function(e){ if(e.target === wrap) closePreview(); });
+}
+window.addEventListener("message", function(e){
+  if(e.data === "closeReport") closePreview();
+});
+document.addEventListener("keydown", function(e){
+  if(e.key === "Escape") closePreview();
+});
+
 function repCsv(){
   var list = repSorted();
   var head = ["رقم التقييم","اسم التقييم","الموقع","الصك","المقيّم","القيمة السوقية","تاريخ التقييم"];
