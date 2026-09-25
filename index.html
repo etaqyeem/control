@@ -545,7 +545,7 @@ function refreshAll(){
         place: [meta.district, meta.city].filter(Boolean).join(" — "),
         deed: meta.deed || "",
         value: isFinite(m) ? m : 0,
-        date: t.slice(0,10)
+        date: meta.vdate || t.slice(0,10)
       });
     });
     renderKPIs();
@@ -556,8 +556,12 @@ function refreshAll(){
 }
 /* ---------- استعراض التقارير (مرتبة حسب صدورها) ---------- */
 function repKey(r){
-  var m = String(r.no || "").match(/(\d{4})\D+(\d+)/);
+  var v = String(r.no || "").trim();
+  if(!v) return -1;
+  var m = v.match(/(\d{4})\D+(\d{1,6})\s*$/);
   if(m) return parseInt(m[1],10) * 1000000 + parseInt(m[2],10);
+  var d = v.match(/(\d+)\s*$/);
+  if(d) return parseInt(d[1],10);
   return -1;
 }
 function repSorted(){
@@ -595,7 +599,7 @@ function renderReports(){
   }
 
   var rows = ['<tr><th>#</th><th>رقم التقييم</th><th>اسم التقييم</th><th>الموقع</th>' +
-              '<th>الصك</th><th>المقيّم</th><th>القيمة السوقية</th><th>التاريخ</th></tr>'];
+              '<th>الصك</th><th>المقيّم</th><th>القيمة السوقية</th><th>تاريخ التقييم</th></tr>'];
   list.forEach(function(r, i){
     rows.push('<tr>' +
       '<td class="idx">' + (i + 1) + '</td>' +
@@ -612,7 +616,7 @@ function renderReports(){
 }
 function repCsv(){
   var list = repSorted();
-  var head = ["رقم التقييم","اسم التقييم","الموقع","الصك","المقيّم","القيمة السوقية","التاريخ"];
+  var head = ["رقم التقييم","اسم التقييم","الموقع","الصك","المقيّم","القيمة السوقية","تاريخ التقييم"];
   function cell(v){ return '"' + String(v == null ? "" : v).replace(/"/g, '""') + '"'; }
   var lines = [head.map(cell).join(",")];
   list.forEach(function(r){
