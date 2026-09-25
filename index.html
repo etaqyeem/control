@@ -104,6 +104,21 @@ input,select,textarea{font:inherit; color:inherit}
 input[type=number]{-moz-appearance:textfield}
 input[type=number]::-webkit-outer-spin-button,input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none; margin:0}
 
+.panel > header .ico{
+  width:27px; height:27px; border-radius:8px; flex:none; display:grid; place-items:center;
+  background:var(--accent-soft); color:var(--accent-ink);
+}
+.panel > header .ico svg{width:15px; height:15px}
+.repbar{display:flex; gap:9px; align-items:center; flex-wrap:wrap; padding:11px 14px; border-bottom:1px solid var(--line)}
+.repbar .sb{flex:1 1 230px; display:flex; align-items:center; gap:6px; background:var(--surface-2); border:1px solid var(--line); border-radius:8px; padding:0 10px}
+.repbar .sb span{color:var(--faint); font-size:14px}
+.repbar .sb input{flex:1; min-width:0; background:transparent; border:0; padding:7px 4px; font-size:12.5px}
+.repbar .sb input:focus{outline:none}
+.users-tbl .no{font-variant-numeric:tabular-nums; font-weight:600; color:var(--accent-ink)}
+.users-tbl .money{font-variant-numeric:tabular-nums; font-weight:600; white-space:nowrap}
+.users-tbl .dt{font-variant-numeric:tabular-nums; color:var(--muted); font-size:11.5px; white-space:nowrap}
+.users-tbl .idx{color:var(--faint); font-size:11px; font-variant-numeric:tabular-nums}
+.emptyrow{padding:22px 14px; text-align:center; color:var(--faint); font-size:12.5px}
 .kpis{display:grid; gap:9px; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); padding:12px 14px}
 .kpi{background:var(--surface-2); border:1px solid var(--line); border-radius:var(--r); padding:10px 12px}
 .kpi .k{font-size:10.5px; color:var(--muted); font-weight:600}
@@ -201,6 +216,25 @@ input[type=number]::-webkit-outer-spin-button,input[type=number]::-webkit-inner-
     </section>
 
     <section class="panel">
+      <header>
+        <span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2.8h8.2L19 7.6V21.2H6z"/><path d="M14 2.8v5h5"/><path d="M9 12.5h7M9 16h7"/></svg></span>
+        <h2>استعراض التقارير</h2>
+        <span class="hint" id="repHint"></span>
+        <button class="btn tiny" id="btnRepToggle" type="button">إظهار</button>
+      </header>
+      <div id="repBody" hidden>
+        <div class="repbar">
+          <div class="sb"><span>⌕</span>
+            <input id="repSearch" type="search" placeholder="بحث برقم التقييم أو الاسم أو الحي أو المقيّم">
+          </div>
+          <button class="btn tiny" id="btnRepOrder" type="button">الأحدث صدورًا أولًا ↓</button>
+          <button class="btn tiny" id="btnRepCsv" type="button">تصدير CSV</button>
+        </div>
+        <div style="overflow-x:auto"><table class="users-tbl" id="repTbl"></table></div>
+      </div>
+    </section>
+
+    <section class="panel">
       <header><h2>التحكم بالتطبيق</h2><span class="hint">يسري على جميع المستخدمين فورًا</span></header>
       <div class="setgrid">
         <div class="setrow">
@@ -287,6 +321,7 @@ input[type=number]::-webkit-outer-spin-button,input[type=number]::-webkit-inner-
 var CFGX = (window.APP_CONFIG || {});
 var SB = null, ME = null;
 var USERS = [], COUNTS = {}, STATS = {total:0, month:0, week:0, sum:0};
+var REPORTS = [], REP_DESC = true;
 var SET = {
   maintenance:false, maintenance_msg:"", allow_signup:true, auto_approve:false,
   allow_export:true, default_limit:0, max_reports:0, notice:""
@@ -487,11 +522,11 @@ function refreshAll(){
   $("ovHint").textContent = "جارٍ التحديث…";
   return Promise.all([
     SB.from("profiles").select("*").order("created_at", {ascending:true}),
-    SB.from("valuations").select("owner,updated_at,state").limit(2000)
+    SB.from("valuations").select("id,name,form_no,owner,by_name,updated_at,state").limit(2000)
   ]).then(function(res){
     if(res[0].error){ $("ovHint").textContent = "تعذّرت القراءة"; setState(errAr(res[0].error), "err"); return; }
     USERS = res[0].data || [];
-    COUNTS = {}; STATS = {total:0, month:0, week:0, sum:0};
+    COUNTS = {}; STATS = {total:0, month:0, week:0, sum:0}; REPORTS = [];
     var mk = new Date().toISOString().slice(0,7);
     var wk = new Date(Date.now() - 7*864e5).toISOString();
     (res[1].data || []).forEach(function(v){
@@ -502,12 +537,95 @@ function refreshAll(){
       if(t >= wk) STATS.week++;
       var m = marketOf(v.state);
       if(isFinite(m)) STATS.sum += m;
+      var meta = (v.state && v.state.meta) || {};
+      REPORTS.push({
+        no: v.form_no || meta.formNo || "",
+        name: v.name || "",
+        by: v.by_name || meta.appraiser || "",
+        place: [meta.district, meta.city].filter(Boolean).join(" — "),
+        deed: meta.deed || "",
+        value: isFinite(m) ? m : 0,
+        date: t.slice(0,10)
+      });
     });
     renderKPIs();
     renderUsers();
+    renderReports();
     $("ovHint").textContent = "آخر تحديث " + new Date().toLocaleTimeString("ar-SA-u-nu-latn", {hour:"2-digit", minute:"2-digit"});
   });
 }
+/* ---------- استعراض التقارير (مرتبة حسب صدورها) ---------- */
+function repKey(r){
+  var m = String(r.no || "").match(/(\d{4})\D+(\d+)/);
+  if(m) return parseInt(m[1],10) * 1000000 + parseInt(m[2],10);
+  return -1;
+}
+function repSorted(){
+  var list = REPORTS.slice();
+  list.sort(function(a,b){
+    var ka = repKey(a), kb = repKey(b);
+    if(ka !== kb){
+      if(ka < 0) return 1;      /* بلا رقم → آخر القائمة دائمًا */
+      if(kb < 0) return -1;
+      return REP_DESC ? kb - ka : ka - kb;
+    }
+    var da = a.date || "", db = b.date || "";
+    return REP_DESC ? (db < da ? -1 : db > da ? 1 : 0) : (da < db ? -1 : da > db ? 1 : 0);
+  });
+  return list;
+}
+function renderReports(){
+  var tbl = $("repTbl");
+  if(!tbl) return;
+  var qEl = $("repSearch");
+  var q = qEl ? qEl.value.trim().toLowerCase() : "";
+  var list = repSorted().filter(function(r){
+    if(!q) return true;
+    return [r.no, r.name, r.by, r.place, r.deed].join(" ").toLowerCase().indexOf(q) !== -1;
+  });
+
+  $("repHint").textContent = REPORTS.length
+    ? (q ? list.length + " من " + REPORTS.length + " تقرير" : REPORTS.length + " تقرير")
+    : "لا توجد تقارير بعد";
+
+  if(!list.length){
+    tbl.innerHTML = '<tr><td class="emptyrow">' +
+      (REPORTS.length ? 'لا نتائج مطابقة للبحث.' : 'لا توجد تقارير محفوظة بعد.') + '</td></tr>';
+    return;
+  }
+
+  var rows = ['<tr><th>#</th><th>رقم التقييم</th><th>اسم التقييم</th><th>الموقع</th>' +
+              '<th>الصك</th><th>المقيّم</th><th>القيمة السوقية</th><th>التاريخ</th></tr>'];
+  list.forEach(function(r, i){
+    rows.push('<tr>' +
+      '<td class="idx">' + (i + 1) + '</td>' +
+      '<td class="no">' + (r.no ? esc(r.no) : '<span style="color:var(--faint);font-weight:400">بلا رقم</span>') + '</td>' +
+      '<td class="nm">' + esc(r.name || "—") + '</td>' +
+      '<td>' + esc(r.place || "—") + '</td>' +
+      '<td>' + esc(r.deed || "—") + '</td>' +
+      '<td>' + esc(r.by || "—") + '</td>' +
+      '<td class="money">' + n0(r.value) + '</td>' +
+      '<td class="dt">' + esc(r.date || "—") + '</td>' +
+    '</tr>');
+  });
+  tbl.innerHTML = rows.join("");
+}
+function repCsv(){
+  var list = repSorted();
+  var head = ["رقم التقييم","اسم التقييم","الموقع","الصك","المقيّم","القيمة السوقية","التاريخ"];
+  function cell(v){ return '"' + String(v == null ? "" : v).replace(/"/g, '""') + '"'; }
+  var lines = [head.map(cell).join(",")];
+  list.forEach(function(r){
+    lines.push([r.no, r.name, r.place, r.deed, r.by, Math.round(r.value), r.date].map(cell).join(","));
+  });
+  var blob = new Blob(["\uFEFF" + lines.join("\r\n")], {type:"text/csv;charset=utf-8"});
+  var a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "التقارير-" + new Date().toISOString().slice(0,10) + ".csv";
+  document.body.appendChild(a); a.click();
+  setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); }, 1500);
+}
+
 function kpi(k, v, s, alert){
   return '<div class="kpi' + (alert ? ' alert' : '') + '">' +
     '<div class="k">'+k+'</div><div class="v">'+v+'</div><div class="s">'+(s || "&nbsp;")+'</div></div>';
@@ -658,6 +776,19 @@ function patchUser(uid, patch){
 
 /* ---------- الإقلاع ---------- */
 $("btnOut").addEventListener("click", logout);
+$("btnRepToggle").addEventListener("click", function(){
+  var b = $("repBody");
+  b.hidden = !b.hidden;
+  this.textContent = b.hidden ? "إظهار" : "إخفاء";
+  if(!b.hidden) renderReports();
+});
+$("repSearch").addEventListener("input", function(){ renderReports(); });
+$("btnRepOrder").addEventListener("click", function(){
+  REP_DESC = !REP_DESC;
+  this.textContent = REP_DESC ? "الأحدث صدورًا أولًا ↓" : "الأقدم صدورًا أولًا ↑";
+  renderReports();
+});
+$("btnRepCsv").addEventListener("click", repCsv);
 $("btnSaveSet").addEventListener("click", function(){ saveSettings(this); });
 $("btnReload").addEventListener("click", function(){
   loadSettings().then(function(){ fillSettingsForm(); return refreshAll(); });
